@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { Search, MapPin, Users, Hash, FileText, Factory, LucideIcon } from 'lucide-react';
 
 interface NewSearchFormProps {
-  onSubmit: (data: NewSearchFormData) => void;
+  onSubmit: (data: NewSearchFormData) => Promise<void>;
 }
 
 export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
@@ -15,6 +15,7 @@ export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
   const [collaborationType, setCollaborationType] = useState<CollabType>('both');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   function validate() {
     const e: Record<string, string> = {};
@@ -26,7 +27,7 @@ export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
     return e;
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) {
@@ -34,17 +35,20 @@ export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
       return;
     }
     setSubmitting(true);
-    // Simulate brief "agent launching" delay
-    setTimeout(() => {
-      onSubmit({
+    setApiError(null);
+    try {
+      await onSubmit({
         description: description.trim(),
         industry,
         location: location.trim(),
         numberOfResults,
         collaborationType,
       });
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
       setSubmitting(false);
-    }, 800);
+    }
+    // Don't setSubmitting(false) on success — parent navigates away
   }
 
   const collabOptions: { value: CollabType; label: string; description: string }[] = [
@@ -172,21 +176,35 @@ export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
             </div>
           </Field>
 
+          {/* API error */}
+          {apiError && (
+            <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
+              <p className="text-xs text-red-400">{apiError}</p>
+            </div>
+          )}
+
           {/* Submit */}
           <div className="pt-2">
             <Button
               type="submit"
               variant="primary"
               size="lg"
-              icon={Search}
+              icon={submitting ? undefined : Search}
               loading={submitting}
               className="w-full"
+              disabled={submitting}
             >
-              {submitting ? 'Launching agent…' : 'Launch Search'}
+              {submitting ? 'Scouting startups…' : 'Launch Search'}
             </Button>
-            <p className="text-center text-xs text-zinc-600 mt-3">
-              The agent will scout and shortlist companies matching your criteria.
-            </p>
+            {submitting ? (
+              <p className="text-center text-xs text-amber-500/70 mt-3 animate-pulse">
+                Querying OpenAI → Apollo.io — this may take 5–10 seconds
+              </p>
+            ) : (
+              <p className="text-center text-xs text-zinc-600 mt-3">
+                The agent will scout and shortlist companies matching your criteria.
+              </p>
+            )}
           </div>
         </form>
       </div>

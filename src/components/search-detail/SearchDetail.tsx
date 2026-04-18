@@ -22,7 +22,7 @@ interface SearchDetailProps {
   onBack: () => void;
   onUpdateResult: (resultId: string, status: ResultStatus, callDate?: string | null) => void;
   onResetResult: (resultId: string) => void;
-  onRestartSearch: () => void;
+  onRestartSearch: () => Promise<void>;
 }
 
 export function SearchDetail({
@@ -33,6 +33,16 @@ export function SearchDetail({
   onRestartSearch,
 }: SearchDetailProps) {
   const [filter, setFilter] = useState<Filter>('all');
+  const [restarting, setRestarting] = useState(false);
+
+  async function handleRestart() {
+    setRestarting(true);
+    try {
+      await onRestartSearch();
+    } finally {
+      setRestarting(false);
+    }
+  }
 
   const collabLabel: Record<string, string> = {
     online: 'Online',
@@ -72,8 +82,8 @@ export function SearchDetail({
         <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={onBack}>
           Back to Dashboard
         </Button>
-        <Button variant="secondary" size="sm" icon={RotateCcw} onClick={onRestartSearch}>
-          Restart Search
+        <Button variant="secondary" size="sm" icon={RotateCcw} onClick={handleRestart} loading={restarting} disabled={restarting}>
+          {restarting ? 'Restarting…' : 'Restart Search'}
         </Button>
       </div>
 
