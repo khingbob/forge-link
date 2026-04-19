@@ -1,45 +1,36 @@
-import { ResultStatus, SearchStatus } from '../../types';
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
 
-type BadgeStatus = ResultStatus | SearchStatus;
+import { cn } from "@/lib/utils"
 
-const CONFIG: Record<BadgeStatus, { label: string; className: string }> = {
-  pending: {
-    label: 'Pending',
-    className: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
-  },
-  accepted: {
-    label: 'Accepted',
-    className: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
-  },
-  rejected: {
-    label: 'Rejected',
-    className: 'bg-red-500/15 text-red-400 border border-red-500/30',
-  },
-  cant_reach: {
-    label: "Can't Reach",
-    className: 'bg-zinc-700/60 text-zinc-400 border border-zinc-600',
-  },
-  active: {
-    label: 'Active',
-    className: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
-  },
-  finished: {
-    label: 'Finished',
-    className: 'bg-zinc-700/60 text-zinc-400 border border-zinc-600',
-  },
-};
+const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default:
+          "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        destructive:
+          "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+        outline: "text-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+)
 
-interface BadgeProps {
-  status: BadgeStatus;
-  size?: 'sm' | 'md';
-}
+export interface BadgeProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof badgeVariants> {}
 
-export function Badge({ status, size = 'md' }: BadgeProps) {
-  const { label, className } = CONFIG[status];
-  const sizeClass = size === 'sm' ? 'px-1.5 py-0.5 text-xs' : 'px-2.5 py-1 text-xs';
+function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <span className={`inline-flex items-center rounded-full font-medium ${sizeClass} ${className}`}>
-      {label}
-    </span>
-  );
+    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+  )
 }
+
+export { Badge, badgeVariants }

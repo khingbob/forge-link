@@ -1,7 +1,10 @@
-import { Search } from '../../types';
+import { Search } from '@/types';
 import { SearchCard } from './SearchCard';
-import { Button } from '../ui/Button';
-import { Zap, CheckCircle2, Plus, LayoutDashboard, LucideIcon } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Separator } from '@/components/ui/separator';
+// Button kept for EmptyState action
+import { TrendingUp, TrendingDown, Zap, CheckCircle2, LucideIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface DashboardProps {
   activeSearches: Search[];
@@ -11,124 +14,128 @@ interface DashboardProps {
 }
 
 export function Dashboard({ activeSearches, finishedSearches, onOpenSearch, onNewSearch }: DashboardProps) {
-  const totalResults = [...activeSearches, ...finishedSearches].reduce(
-    (sum, s) => sum + s.results.length,
-    0,
-  );
-  const totalAccepted = [...activeSearches, ...finishedSearches].reduce(
-    (sum, s) => sum + s.results.filter((r) => r.status === 'accepted').length,
-    0,
-  );
+  const allSearches = [...activeSearches, ...finishedSearches];
+  const totalResults = allSearches.reduce((s, search) => s + search.results.length, 0);
+  const totalAccepted = allSearches.reduce((s, search) => s + search.results.filter((r) => r.status === 'accepted').length, 0);
+  const totalPending = allSearches.reduce((s, search) => s + search.results.filter((r) => r.status === 'pending').length, 0);
+  const acceptRate = totalResults > 0 ? Math.round((totalAccepted / totalResults) * 100) : 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <LayoutDashboard size={20} className="text-zinc-500" />
-          <div>
-            <h1 className="text-lg font-semibold text-zinc-50">Dashboard</h1>
-            <p className="text-xs text-zinc-500 mt-0.5">Monitor your scouting searches</p>
-          </div>
-        </div>
-        <Button variant="primary" icon={Plus} onClick={onNewSearch} size="md">
-          New Search
-        </Button>
-      </div>
-
-      {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <StatCard label="Total Searches" value={activeSearches.length + finishedSearches.length} />
-        <StatCard label="Active" value={activeSearches.length} accent="blue" />
-        <StatCard label="Finished" value={finishedSearches.length} accent="zinc" />
-        <StatCard label="Accepted Leads" value={totalAccepted} sub={`of ${totalResults} scouted`} accent="green" />
+    <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col gap-8">
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          title="Total Searches"
+          value={allSearches.length}
+          trend={activeSearches.length > 0 ? `${activeSearches.length} currently active` : 'No active searches'}
+          trendUp={activeSearches.length > 0}
+          sub="All scouting searches"
+        />
+        <StatCard
+          title="Active Searches"
+          value={activeSearches.length}
+          trend={activeSearches.length > 0 ? 'Agents running now' : 'All searches completed'}
+          trendUp={activeSearches.length > 0}
+          sub="In progress right now"
+        />
+        <StatCard
+          title="Accepted Leads"
+          value={totalAccepted}
+          badge={totalResults > 0 ? `${acceptRate}%` : undefined}
+          badgeUp={acceptRate >= 30}
+          trend={totalAccepted > 0 ? 'Partnerships confirmed' : 'No acceptances yet'}
+          trendUp={totalAccepted > 0}
+          sub={`Out of ${totalResults} scouted`}
+        />
+        <StatCard
+          title="Awaiting Reply"
+          value={totalPending}
+          trend={totalPending > 0 ? 'Outreach in progress' : 'All contacted'}
+          trendUp={false}
+          sub="Pending agent outreach"
+        />
       </div>
 
       {/* Active searches */}
-      <Section
-        title="Active Searches"
-        icon={Zap}
-        count={activeSearches.length}
-        iconColor="text-amber-400"
-        emptyText="No active searches. Start one above."
-      >
-        {activeSearches.map((s) => (
-          <SearchCard key={s.id} search={s} onClick={() => onOpenSearch(s.id)} />
-        ))}
-      </Section>
+      <section>
+        <SectionHeader icon={Zap} title="Active Searches" count={activeSearches.length} />
+        {activeSearches.length === 0 ? (
+          <EmptyState message="No active searches." actionLabel="Create one" onAction={onNewSearch} />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {activeSearches.map((s) => <SearchCard key={s.id} search={s} onClick={() => onOpenSearch(s.id)} />)}
+          </div>
+        )}
+      </section>
+
+      <Separator />
 
       {/* Finished searches */}
-      <Section
-        title="Finished Searches"
-        icon={CheckCircle2}
-        count={finishedSearches.length}
-        iconColor="text-zinc-500"
-        emptyText="No finished searches yet."
-      >
-        {finishedSearches.map((s) => (
-          <SearchCard key={s.id} search={s} onClick={() => onOpenSearch(s.id)} />
-        ))}
-      </Section>
+      <section>
+        <SectionHeader icon={CheckCircle2} title="Finished Searches" count={finishedSearches.length} />
+        {finishedSearches.length === 0 ? (
+          <EmptyState message="No finished searches yet." />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {finishedSearches.map((s) => <SearchCard key={s.id} search={s} onClick={() => onOpenSearch(s.id)} />)}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  sub,
-  accent = 'default',
-}: {
-  label: string;
-  value: number;
-  sub?: string;
-  accent?: 'default' | 'blue' | 'zinc' | 'green';
-}) {
-  const valueColor: Record<string, string> = {
-    default: 'text-zinc-50',
-    blue: 'text-blue-400',
-    zinc: 'text-zinc-400',
-    green: 'text-emerald-400',
-  };
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-      <p className="text-xs text-zinc-500 mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${valueColor[accent]}`}>{value}</p>
-      {sub && <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  icon: Icon,
-  count,
-  iconColor,
-  emptyText,
-  children,
-}: {
-  title: string;
-  icon: LucideIcon;
-  count: number;
-  iconColor: string;
-  emptyText: string;
-  children: React.ReactNode;
+function StatCard({ title, value, badge, badgeUp, trend, trendUp, sub }: {
+  title: string; value: number; badge?: string; badgeUp?: boolean;
+  trend: string; trendUp: boolean; sub: string;
 }) {
   return (
-    <div className="mb-10">
-      <div className="flex items-center gap-2.5 mb-4">
-        <Icon size={15} className={iconColor} />
-        <h2 className="text-sm font-semibold text-zinc-300">{title}</h2>
-        <span className="text-xs text-zinc-600 bg-zinc-800 border border-zinc-700 rounded-full px-2 py-0.5">
-          {count}
-        </span>
+    <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">{title}</span>
+        {badge && (
+          <span className={cn(
+            'inline-flex items-center gap-1 text-xs font-medium border rounded-full px-2.5 py-0.5',
+            badgeUp ? 'border-border text-foreground' : 'border-border text-muted-foreground',
+          )}>
+            {badgeUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            {badge}
+          </span>
+        )}
       </div>
-      {count === 0 ? (
-        <div className="border border-dashed border-zinc-800 rounded-xl px-6 py-10 text-center">
-          <p className="text-sm text-zinc-600">{emptyText}</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{children}</div>
+      <div className="text-4xl font-bold tracking-tight tabular-nums">{value}</div>
+      <div className="flex items-center gap-1.5 text-sm font-semibold">
+        {trendUp ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+        {trend}
+      </div>
+      <p className="text-xs text-muted-foreground">{sub}</p>
+    </div>
+  );
+}
+
+function SectionHeader({ icon: Icon, title, count, children }: {
+  icon: LucideIcon; title: string; count: number; children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold">{title}</span>
+        <span className="text-xs bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 font-medium">{count}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ message, actionLabel, onAction }: {
+  message: string; actionLabel?: string; onAction?: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-10 text-center">
+      <p className="text-sm text-muted-foreground mb-3">{message}</p>
+      {onAction && actionLabel && (
+        <Button size="sm" variant="outline" onClick={onAction} className="cursor-pointer">{actionLabel}</Button>
       )}
     </div>
   );

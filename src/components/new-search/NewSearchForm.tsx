@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { NewSearchFormData, CollabType, INDUSTRIES } from '../../types';
-import { Button } from '../ui/Button';
+import { NewSearchFormData, CollabType, INDUSTRIES } from '@/types';
+import { Button } from '@/components/ui/Button';
 import { Search, MapPin, Users, Hash, FileText, Factory, LucideIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface NewSearchFormProps {
   onSubmit: (data: NewSearchFormData) => Promise<void>;
@@ -30,181 +31,95 @@ export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs = validate();
-    if (Object.keys(errs).length) {
-      setErrors(errs);
-      return;
-    }
+    if (Object.keys(errs).length) { setErrors(errs); return; }
     setSubmitting(true);
     setApiError(null);
     try {
-      await onSubmit({
-        description: description.trim(),
-        industry,
-        location: location.trim(),
-        numberOfResults,
-        collaborationType,
-      });
+      await onSubmit({ description: description.trim(), industry, location: location.trim(), numberOfResults, collaborationType });
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setApiError(err instanceof Error ? err.message : 'Something went wrong.');
       setSubmitting(false);
     }
-    // Don't setSubmitting(false) on success — parent navigates away
   }
 
-  const collabOptions: { value: CollabType; label: string; description: string }[] = [
-    { value: 'online', label: 'Online', description: 'Remote collaboration only' },
-    { value: 'offline', label: 'On-site', description: 'Physical presence required' },
-    { value: 'both', label: 'Both', description: 'Open to either format' },
+  const fieldCls = (hasError: boolean) => cn(
+    'w-full bg-input border rounded-lg px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors',
+    hasError ? 'border-destructive' : 'border-border focus:border-ring',
+  );
+
+  const collabOptions: { value: CollabType; label: string; desc: string }[] = [
+    { value: 'online', label: 'Online', desc: 'Remote only' },
+    { value: 'offline', label: 'On-site', desc: 'Physical presence' },
+    { value: 'both', label: 'Both', desc: 'Either format' },
   ];
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-8">
-      {/* Page header */}
       <div className="flex items-center gap-3 mb-8">
-        <Search size={20} className="text-zinc-500" />
+        <Search className="h-5 w-5 text-muted-foreground" />
         <div>
-          <h1 className="text-lg font-semibold text-zinc-50">New Search</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">Define your scouting parameters</p>
+          <h1 className="text-lg font-semibold">New Search</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Define your scouting parameters</p>
         </div>
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-7">
+      <div className="bg-card border border-border rounded-2xl p-7">
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Description */}
-          <Field
-            label="Search description"
-            icon={FileText}
-            required
-            error={errors.description}
-            hint="Describe what you're looking for — technology, capabilities, or specific partnership goals."
-          >
-            <textarea
-              value={description}
-              onChange={(e) => {
-                setDescription(e.target.value);
-                if (errors.description) setErrors((p) => ({ ...p, description: '' }));
-              }}
-              rows={4}
-              placeholder="e.g. Seeking companies with expertise in IoT sensors and edge computing for integration into hydraulic control systems operating in harsh environments…"
-              className={inputCls(!!errors.description) + ' resize-none'}
-            />
+          <Field label="Search description" icon={FileText} required error={errors.description} hint="Describe what you're looking for — technology, capabilities, or partnership goals.">
+            <textarea value={description} onChange={(e) => { setDescription(e.target.value); if (errors.description) setErrors((p) => ({ ...p, description: '' })); }} rows={4} placeholder="e.g. Seeking companies with IoT sensor expertise for integration into hydraulic control systems…" className={cn(fieldCls(!!errors.description), 'resize-none')} />
           </Field>
 
-          {/* Industry */}
           <Field label="Industry" icon={Factory} required error={errors.industry}>
-            <select
-              value={industry}
-              onChange={(e) => {
-                setIndustry(e.target.value);
-                if (errors.industry) setErrors((p) => ({ ...p, industry: '' }));
-              }}
-              className={inputCls(!!errors.industry) + ` appearance-none cursor-pointer ${!industry ? 'text-zinc-600' : 'text-zinc-100'}`}
-            >
+            <select value={industry} onChange={(e) => { setIndustry(e.target.value); if (errors.industry) setErrors((p) => ({ ...p, industry: '' })); }} className={cn(fieldCls(!!errors.industry), 'appearance-none cursor-pointer', !industry ? 'text-muted-foreground' : '')}>
               <option value="" disabled>Select target industry</option>
-              {INDUSTRIES.map((ind) => (
-                <option key={ind} value={ind} className="text-zinc-100 bg-zinc-800">
-                  {ind}
-                </option>
-              ))}
+              {INDUSTRIES.map((ind) => <option key={ind} value={ind}>{ind}</option>)}
             </select>
           </Field>
 
-          {/* Location */}
           <Field label="Location" icon={MapPin} required error={errors.location} hint="Countries, regions, or 'Worldwide'.">
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => {
-                setLocation(e.target.value);
-                if (errors.location) setErrors((p) => ({ ...p, location: '' }));
-              }}
-              placeholder="e.g. Germany, Austria, Switzerland"
-              className={inputCls(!!errors.location)}
-            />
+            <input type="text" value={location} onChange={(e) => { setLocation(e.target.value); if (errors.location) setErrors((p) => ({ ...p, location: '' })); }} placeholder="e.g. Germany, Austria, Switzerland" className={fieldCls(!!errors.location)} />
           </Field>
 
-          {/* Number of results */}
-          <Field
-            label="Number of results"
-            icon={Hash}
-            required
-            error={errors.numberOfResults}
-            hint={`Target number of companies to scout (1–50). Selected: ${numberOfResults}`}
-          >
+          <Field label={`Number of results — ${numberOfResults}`} icon={Hash} required error={errors.numberOfResults} hint="Max 25 — Apollo API limit.">
             <div className="flex items-center gap-4">
-              <input
-                type="range"
-                min={1}
-                max={50}
-                value={numberOfResults}
-                onChange={(e) => setNumberOfResults(Number(e.target.value))}
-                className="flex-1 accent-amber-500 cursor-pointer"
-              />
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={numberOfResults}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setNumberOfResults(Math.min(50, Math.max(1, v)));
-                  if (errors.numberOfResults) setErrors((p) => ({ ...p, numberOfResults: '' }));
-                }}
-                className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-2 text-sm text-center text-zinc-100 outline-none focus:border-amber-500"
-              />
+              <input type="range" min={1} max={25} value={numberOfResults} onChange={(e) => setNumberOfResults(Number(e.target.value))} className="flex-1 accent-primary cursor-pointer" />
+              <input type="number" min={1} max={25} value={numberOfResults} onChange={(e) => { setNumberOfResults(Math.min(25, Math.max(1, Number(e.target.value)))); }} className="w-20 bg-input border border-border rounded-lg px-2.5 py-2 text-sm text-center text-foreground outline-none focus:border-ring" />
             </div>
           </Field>
 
-          {/* Collaboration type */}
           <Field label="Collaboration type" icon={Users} required>
             <div className="grid grid-cols-3 gap-3">
               {collabOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setCollaborationType(opt.value)}
-                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer
-                    ${collaborationType === opt.value
-                      ? 'border-amber-500 bg-amber-500/10 text-amber-300'
-                      : 'border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300'
-                    }`}
-                >
+                <button key={opt.value} type="button" onClick={() => setCollaborationType(opt.value)}
+                  className={cn('p-3 rounded-lg border text-left transition-all cursor-pointer',
+                    collaborationType === opt.value
+                      ? 'border-foreground bg-secondary text-foreground'
+                      : 'border-border bg-card text-muted-foreground hover:border-muted-foreground hover:text-foreground',
+                  )}>
                   <p className="text-xs font-semibold mb-0.5">{opt.label}</p>
-                  <p className="text-xs opacity-70">{opt.description}</p>
+                  <p className="text-xs opacity-70">{opt.desc}</p>
                 </button>
               ))}
             </div>
           </Field>
 
-          {/* API error */}
           {apiError && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
-              <p className="text-xs text-red-400">{apiError}</p>
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 px-4 py-3">
+              <p className="text-xs text-destructive">{apiError}</p>
             </div>
           )}
 
-          {/* Submit */}
           <div className="pt-2">
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              icon={submitting ? undefined : Search}
-              loading={submitting}
-              className="w-full"
-              disabled={submitting}
-            >
-              {submitting ? 'Scouting startups…' : 'Launch Search'}
+            <Button type="submit" className="w-full cursor-pointer" disabled={submitting}>
+              {submitting ? (
+                <><span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> Scouting startups…</>
+              ) : (
+                <><Search className="h-4 w-4" /> Launch Search</>
+              )}
             </Button>
-            {submitting ? (
-              <p className="text-center text-xs text-amber-500/70 mt-3 animate-pulse">
-                Querying OpenAI → Apollo.io — this may take 5–10 seconds
-              </p>
-            ) : (
-              <p className="text-center text-xs text-zinc-600 mt-3">
-                The agent will scout and shortlist companies matching your criteria.
-              </p>
-            )}
+            <p className="text-center text-xs text-muted-foreground mt-3">
+              {submitting ? 'Querying OpenAI → Apollo.io — this may take 5–10 seconds' : 'The agent will scout companies matching your criteria.'}
+            </p>
           </div>
         </form>
       </div>
@@ -212,36 +127,17 @@ export function NewSearchForm({ onSubmit }: NewSearchFormProps) {
   );
 }
 
-function inputCls(hasError: boolean) {
-  return `w-full bg-zinc-800 border rounded-lg px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none transition-colors
-    ${hasError ? 'border-red-500 focus:border-red-400' : 'border-zinc-700 focus:border-amber-500'}`;
-}
-
-function Field({
-  label,
-  icon: Icon,
-  required,
-  error,
-  hint,
-  children,
-}: {
-  label: string;
-  icon: LucideIcon;
-  required?: boolean;
-  error?: string;
-  hint?: string;
-  children: React.ReactNode;
+function Field({ label, icon: Icon, required, error, hint, children }: {
+  label: string; icon: LucideIcon; required?: boolean; error?: string; hint?: string; children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 mb-2">
-        <Icon size={12} className="text-zinc-600" />
-        {label}
-        {required && <span className="text-amber-500">*</span>}
+      <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
+        <Icon className="h-3 w-3" />{label}{required && <span className="text-destructive">*</span>}
       </label>
       {children}
-      {hint && !error && <p className="mt-1.5 text-xs text-zinc-600">{hint}</p>}
-      {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
+      {hint && !error && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
+      {error && <p className="mt-1.5 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
