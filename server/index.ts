@@ -1,13 +1,30 @@
-import express from 'express';
-import cors from 'cors';
-import OpenAI from 'openai';
-import * as dotenv from 'dotenv';
+import express from "express";
+import cors from "cors";
+import OpenAI from "openai";
+import * as dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(express.json());
+app.use((req, res, next) => {
+  if (req.path === "/client-response") {
+    return cors({ origin: "*" })(req, res, next);
+  }
+  return cors({ origin: "http://localhost:5173" })(req, res, next);
+});
+
+app.all("/client-response", (req, res) => {
+  const snapshot = {
+    method: req.method,
+    path: req.path,
+    query: req.query,
+    headers: req.headers,
+    body: req.body,
+  };
+  console.log("[client-response] received:", JSON.stringify(snapshot, null, 2));
+  res.status(200).json({ ok: true });
+});
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -51,9 +68,15 @@ interface ApolloOrganization {
   city?: string;
 }
 
-app.post('/api/scout', async (req, res) => {
+app.post("/api/scout", async (req, res) => {
   try {
-    const { description, industry, location, numberOfResults, collaborationType } = req.body as {
+    const {
+      description,
+      industry,
+      location,
+      numberOfResults,
+      collaborationType,
+    } = req.body as {
       description: string;
       industry: string;
       location: string;
@@ -69,56 +92,72 @@ Number of results requested: ${Math.min(numberOfResults, 25)}
 Collaboration type: ${collaborationType}
     `.trim();
 
-    console.log('[Scout] Calling OpenAI for Apollo payload…');
+    console.log("[Scout] Calling OpenAI for Apollo payload…");
 
     // Step 1: OpenAI translates intent → Apollo query
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: "gpt-4o",
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Manager Query:\n${userQuery}` },
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `Manager Query:\n${userQuery}` },
       ],
-      response_format: { type: 'json_object' },
+      response_format: { type: "json_object" },
     });
 
-    const rawContent = completion.choices[0].message.content ?? '{}';
+    const rawContent = completion.choices[0].message.content ?? "{}";
     const aiOutput = JSON.parse(rawContent) as {
       apollo_payload: Record<string, unknown>;
-      reasoning_trace: Array<{ id: string; step: number; title: string; body: string }>;
+      reasoning_trace: Array<{
+        id: string;
+        step: number;
+        title: string;
+        body: string;
+      }>;
     };
 
     const { apollo_payload, reasoning_trace } = aiOutput;
-    console.log('[Scout] Apollo payload:', JSON.stringify(apollo_payload, null, 2));
+    console.log(
+      "[Scout] Apollo payload:",
+      JSON.stringify(apollo_payload, null, 2),
+    );
 
     // Step 2: Call Apollo
-    const apolloRes = await fetch('https://api.apollo.io/v1/organizations/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': process.env.APOLLO_API_KEY ?? '',
-        'Cache-Control': 'no-cache',
+    const apolloRes = await fetch(
+      "https://api.apollo.io/v1/organizations/search",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": process.env.APOLLO_API_KEY ?? "",
+          "Cache-Control": "no-cache",
+        },
+        body: JSON.stringify(apollo_payload),
       },
-      body: JSON.stringify(apollo_payload),
-    });
+    );
 
     if (!apolloRes.ok) {
       const text = await apolloRes.text();
-      console.error('[Scout] Apollo error:', apolloRes.status, text);
+      console.error("[Scout] Apollo error:", apolloRes.status, text);
       throw new Error(`Apollo responded with ${apolloRes.status}`);
     }
 
-    const apolloData = (await apolloRes.json()) as { organizations?: ApolloOrganization[] };
-    const orgs: ApolloOrganization[] = (apolloData.organizations ?? []).slice(0, numberOfResults);
+    const apolloData = (await apolloRes.json()) as {
+      organizations?: ApolloOrganization[];
+    };
+    const orgs: ApolloOrganization[] = (apolloData.organizations ?? []).slice(
+      0,
+      numberOfResults,
+    );
 
     console.log(`[Scout] Apollo returned ${orgs.length} organizations`);
 
     // Step 3: Map to our SearchResult shape
     const results = orgs.map((org, i) => {
       const domain = org.primary_domain || extractDomain(org.website_url);
-      const keywordStr = (org.keywords ?? []).slice(0, 4).join(', ');
+      const keywordStr = (org.keywords ?? []).slice(0, 4).join(", ");
       const empCount = org.estimated_num_employees
         ? `${org.estimated_num_employees} employees.`
-        : '';
+        : "";
 
       return {
         id: `result-live-${i}`,
@@ -128,32 +167,42 @@ Collaboration type: ${collaborationType}
           org.description ||
           `${org.name} operates in the ${org.industry ?? industry} sector.`,
         fitExplanation:
-          `Industry: ${org.industry ?? industry}. ${empCount} ${keywordStr ? `Keywords: ${keywordStr}.` : ''} ` +
-          `Located in ${[org.city, org.country].filter(Boolean).join(', ') || location}. ` +
+          `Industry: ${org.industry ?? industry}. ${empCount} ${keywordStr ? `Keywords: ${keywordStr}.` : ""} ` +
+          `Located in ${[org.city, org.country].filter(Boolean).join(", ") || location}. ` +
           `Matched via Apollo search for "${industry}" in ${location}.`,
         industry: org.industry ?? industry,
         website: domain,
-        contact: 'example@gmail.com',
-        status: 'pending' as const,
+        contact: "example@gmail.com",
+        status: "pending" as const,
         agreedCallDate: null,
       };
     });
 
-    res.json({ results, reasoningTrace: reasoning_trace, appliedFilters: apollo_payload });
+    res.json({
+      results,
+      reasoningTrace: reasoning_trace,
+      appliedFilters: apollo_payload,
+    });
   } catch (err) {
-    console.error('[Scout] Error:', err);
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Scout failed' });
+    console.error("[Scout] Error:", err);
+    res
+      .status(500)
+      .json({ error: err instanceof Error ? err.message : "Scout failed" });
   }
 });
 
 function extractDomain(url?: string): string {
-  if (!url) return '';
+  if (!url) return "";
   try {
-    return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace('www.', '');
+    return new URL(
+      url.startsWith("http") ? url : `https://${url}`,
+    ).hostname.replace("www.", "");
   } catch {
     return url;
   }
 }
 
 const PORT = process.env.PORT ?? 3001;
-app.listen(PORT, () => console.log(`[ForgeLink server] running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`[ForgeLink server] running on http://localhost:${PORT}`),
+);
