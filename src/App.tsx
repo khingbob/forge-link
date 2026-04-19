@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CompanyProfile, ResultStatus, NewSearchFormData } from './types';
 import { getProfile, setProfile } from './lib/storage';
 import { useSearches } from './hooks/useSearches';
@@ -17,8 +17,34 @@ type View =
 export default function App() {
   const [profile, setProfileState] = useState<CompanyProfile | null>(() => getProfile());
   const [view, setView] = useState<View>({ type: 'dashboard' });
-  const { activeSearches, finishedSearches, getSearch, createSearch, setResultStatus, restartSearch } =
+  const { activeSearches, finishedSearches, getSearch, createSearch, setResultStatus, updateResultByCompanyName, restartSearch } =
     useSearches();
+
+  // Poll for HappyRobot call results every 30 s
+  useEffect(() => {
+    async function checkCallResults() {
+      try {
+        const res = await fetch('/api/call-results');
+        if (!res.ok) return;
+        const { results } = await res.json() as {
+          results: { id: string; startupName: string; classification: string }[];
+        };
+        for (const item of results) {
+          if (item.classification === 'Interested') {
+            updateResultByCompanyName(item.startupName, { status: 'accepted' });
+          }
+          // Mark processed regardless of classification so we don't re-process
+          fetch(`/api/call-results/${item.id}/mark-processed`, { method: 'POST' }).catch(() => {});
+        }
+      } catch {
+        // server may not be running — ignore
+      }
+    }
+
+    checkCallResults();
+    const interval = setInterval(checkCallResults, 30_000);
+    return () => clearInterval(interval);
+  }, [updateResultByCompanyName]);
 
   function handleRegister(data: Omit<CompanyProfile, 'id' | 'registeredAt'>) {
     const p: CompanyProfile = {
@@ -85,6 +111,7 @@ export default function App() {
             return (
               <SearchDetail
                 search={search}
+                profile={profile}
                 onBack={handleBack}
                 onUpdateResult={(resultId, status, callDate) =>
                   setResultStatus(search.id, resultId, status as ResultStatus, callDate)

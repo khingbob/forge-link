@@ -2,8 +2,123 @@ import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import * as dotenv from "dotenv";
+import cron from "node-cron";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TRACKING_FILE = path.join(__dirname, "outreach-tracking.json");
+const CALL_RESULTS_FILE = path.join(__dirname, "call-results.json");
+const CALL_WEBHOOK_URL = "https://workflows.platform.eu.happyrobot.ai/hooks/paa3bqir9y8u";
+
+// ── Outreach tracking helpers ─────────────────────────────────────────────────
+
+interface OutreachRecord {
+  id: string;
+  startupName: string;
+  emailContext: string;
+  outreachedAt: string; // ISO date
+  callTriggered: boolean;
+}
+
+function readTracking(): OutreachRecord[] {
+  try {
+    if (!fs.existsSync(TRACKING_FILE)) return [];
+    return JSON.parse(fs.readFileSync(TRACKING_FILE, "utf-8")) as OutreachRecord[];
+  } catch {
+    return [];
+  }
+}
+
+function writeTracking(records: OutreachRecord[]): void {
+  fs.writeFileSync(TRACKING_FILE, JSON.stringify(records, null, 2));
+}
+
+// ── Call results (HappyRobot callback storage) ────────────────────────────────
+
+interface CallResult {
+  id: string;
+  startupName: string;
+  classification: string;
+  receivedAt: string;
+  processed: boolean;
+}
+
+function readCallResults(): CallResult[] {
+  try {
+    if (!fs.existsSync(CALL_RESULTS_FILE)) return [];
+    return JSON.parse(fs.readFileSync(CALL_RESULTS_FILE, "utf-8")) as CallResult[];
+  } catch {
+    return [];
+  }
+}
+
+function writeCallResults(records: CallResult[]): void {
+  fs.writeFileSync(CALL_RESULTS_FILE, JSON.stringify(records, null, 2));
+}
+
+async function runFollowUpCheck() {
+  const records = readTracking();
+  const now = new Date();
+  const updated = [...records];
+  let triggered = 0;
+
+  for (let i = 0; i < updated.length; i++) {
+    const record = updated[i];
+    if (record.callTriggered) continue;
+
+    const daysSince =
+      (now.getTime() - new Date(record.outreachedAt).getTime()) /
+      (1000 * 60 * 60 * 24);
+
+    if (daysSince >= 14) {
+      try {
+        const res = await fetch(CALL_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            startup_name: record.startupName,
+            email_context: record.emailContext,
+          }),
+        });
+        if (res.ok) {
+          updated[i] = { ...record, callTriggered: true };
+          triggered++;
+          console.log(`[Cron] Call triggered for ${record.startupName}`);
+        } else {
+          console.error(
+            `[Cron] Webhook error for ${record.startupName}: ${res.status}`
+          );
+        }
+      } catch (err) {
+        console.error(
+          `[Cron] Failed to trigger call for ${record.startupName}:`,
+          err
+        );
+      }
+    }
+  }
+
+  writeTracking(updated);
+  console.log(
+    `[Cron] Follow-up check done — ${triggered} call(s) triggered, ${records.filter((r) => !r.callTriggered).length} pending`
+  );
+}
+
+// Run every day at 09:00
+cron.schedule("0 9 * * *", () => {
+  console.log("[Cron] Daily follow-up check starting…");
+  runFollowUpCheck().catch((err) =>
+    console.error("[Cron] Unexpected error:", err)
+  );
+});
+
+console.log("[Cron] Daily follow-up scheduler registered (runs at 09:00)");
+
+// ── Express setup ─────────────────────────────────────────────────────────────
 
 const app = express();
 app.use(express.json());
@@ -25,6 +140,85 @@ app.all("/client-response", (req, res) => {
   console.log("[client-response] received:", JSON.stringify(snapshot, null, 2));
   res.status(200).json({ ok: true });
 });
+
+// ── HappyRobot callback ───────────────────────────────────────────────────────
+// HappyRobot POSTs here after each call. Open CORS — external caller.
+
+app.post("/happyrobot-callback", cors({ origin: "*" }), (req, res) => {
+  const { classification } = req.body as { classification?: string };
+  console.log("[HappyRobot] Callback received:", req.body);
+
+  // Identify the startup: use startup_name if provided, else last triggered call
+  const startupName: string =
+    (req.body as { startup_name?: string }).startup_name ??
+    (() => {
+      const records = readTracking();
+      return records.filter((r) => r.callTriggered).pop()?.startupName ?? "Unknown";
+    })();
+
+  const result: CallResult = {
+    id: `call-${Date.now()}`,
+    startupName,
+    classification: classification ?? "Unknown",
+    receivedAt: new Date().toISOString(),
+    processed: false,
+  };
+
+  const results = readCallResults();
+  results.push(result);
+  writeCallResults(results);
+
+  console.log(`[HappyRobot] Stored result for "${startupName}": ${classification}`);
+  res.json({ ok: true });
+});
+
+// ── Call results polling (client) ─────────────────────────────────────────────
+
+app.get("/api/call-results", (req, res) => {
+  const unprocessed = readCallResults().filter((r) => !r.processed);
+  res.json({ results: unprocessed });
+});
+
+app.post("/api/call-results/:id/mark-processed", (req, res) => {
+  const records = readCallResults();
+  const updated = records.map((r) =>
+    r.id === req.params.id ? { ...r, processed: true } : r
+  );
+  writeCallResults(updated);
+  res.json({ ok: true });
+});
+
+// ── Track outreach ────────────────────────────────────────────────────────────
+
+app.post("/api/track-outreach", (req, res) => {
+  const { startupName, emailContext } = req.body as {
+    startupName: string;
+    emailContext: string;
+  };
+
+  if (!startupName) {
+    res.status(400).json({ error: "startupName is required" });
+    return;
+  }
+
+  const records = readTracking();
+  const newRecord: OutreachRecord = {
+    id: `outreach-${Date.now()}`,
+    startupName,
+    emailContext,
+    outreachedAt: new Date().toISOString(),
+    callTriggered: false,
+  };
+  records.push(newRecord);
+  writeTracking(records);
+
+  console.log(
+    `[Track] Outreach recorded for "${startupName}" — call will trigger in 14 days if no reply`
+  );
+  res.json({ ok: true });
+});
+
+// ── Scout ─────────────────────────────────────────────────────────────────────
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -94,7 +288,6 @@ Collaboration type: ${collaborationType}
 
     console.log("[Scout] Calling OpenAI for Apollo payload…");
 
-    // Step 1: OpenAI translates intent → Apollo query
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -116,12 +309,8 @@ Collaboration type: ${collaborationType}
     };
 
     const { apollo_payload, reasoning_trace } = aiOutput;
-    console.log(
-      "[Scout] Apollo payload:",
-      JSON.stringify(apollo_payload, null, 2),
-    );
+    console.log("[Scout] Apollo payload:", JSON.stringify(apollo_payload, null, 2));
 
-    // Step 2: Call Apollo
     const apolloRes = await fetch(
       "https://api.apollo.io/v1/organizations/search",
       {
@@ -132,7 +321,7 @@ Collaboration type: ${collaborationType}
           "Cache-Control": "no-cache",
         },
         body: JSON.stringify(apollo_payload),
-      },
+      }
     );
 
     if (!apolloRes.ok) {
@@ -146,12 +335,11 @@ Collaboration type: ${collaborationType}
     };
     const orgs: ApolloOrganization[] = (apolloData.organizations ?? []).slice(
       0,
-      numberOfResults,
+      numberOfResults
     );
 
     console.log(`[Scout] Apollo returned ${orgs.length} organizations`);
 
-    // Step 3: Map to our SearchResult shape
     const results = orgs.map((org, i) => {
       const domain = org.primary_domain || extractDomain(org.website_url);
       const keywordStr = (org.keywords ?? []).slice(0, 4).join(", ");
@@ -167,9 +355,9 @@ Collaboration type: ${collaborationType}
           org.description ||
           `${org.name} operates in the ${org.industry ?? industry} sector.`,
         fitExplanation:
-          `Industry: ${org.industry ?? industry}. ${empCount} ${keywordStr ? `Keywords: ${keywordStr}.` : ""} ` +
-          `Located in ${[org.city, org.country].filter(Boolean).join(", ") || location}. ` +
-          `Matched via Apollo search for "${industry}" in ${location}.`,
+          `Industry: ${org.industry ?? industry}. ${empCount} ${keywordStr ? `Keywords: ${keywordStr}.` : ""}` +
+          ` Located in ${[org.city, org.country].filter(Boolean).join(", ") || location}.` +
+          ` Matched via Apollo search for "${industry}" in ${location}.`,
         industry: org.industry ?? industry,
         website: domain,
         contact: "example@gmail.com",
@@ -195,7 +383,7 @@ function extractDomain(url?: string): string {
   if (!url) return "";
   try {
     return new URL(
-      url.startsWith("http") ? url : `https://${url}`,
+      url.startsWith("http") ? url : `https://${url}`
     ).hostname.replace("www.", "");
   } catch {
     return url;
@@ -204,5 +392,5 @@ function extractDomain(url?: string): string {
 
 const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, () =>
-  console.log(`[ForgeLink server] running on http://localhost:${PORT}`),
+  console.log(`[ForgeLink server] running on http://localhost:${PORT}`)
 );

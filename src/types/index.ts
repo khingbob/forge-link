@@ -28,6 +28,8 @@ export interface CompanyProfile {
   companyName: string;
   industry: string;
   description: string;
+  managerName: string;
+  address: string;
   registeredAt: string;
 }
 

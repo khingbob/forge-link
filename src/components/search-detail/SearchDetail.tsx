@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, ResultStatus } from '../../types';
+import { Search, ResultStatus, CompanyProfile } from '../../types';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { ReasoningTrace } from './ReasoningTrace';
@@ -13,12 +13,18 @@ import {
   RotateCcw,
   Hash,
   LucideIcon,
+  Send,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
+
+const OUTREACH_URL = 'https://workflows.platform.eu.happyrobot.ai/hooks/l05uxu836lfg';
 
 type Filter = 'all' | ResultStatus;
 
 interface SearchDetailProps {
   search: Search;
+  profile: CompanyProfile;
   onBack: () => void;
   onUpdateResult: (resultId: string, status: ResultStatus, callDate?: string | null) => void;
   onResetResult: (resultId: string) => void;
@@ -27,6 +33,7 @@ interface SearchDetailProps {
 
 export function SearchDetail({
   search,
+  profile,
   onBack,
   onUpdateResult,
   onResetResult,
@@ -34,6 +41,9 @@ export function SearchDetail({
 }: SearchDetailProps) {
   const [filter, setFilter] = useState<Filter>('all');
   const [restarting, setRestarting] = useState(false);
+  const [outreaching, setOutreaching] = useState(false);
+  const [outreachStatus, setOutreachStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [outreachError, setOutreachError] = useState('');
 
   async function handleRestart() {
     setRestarting(true);
@@ -41,6 +51,63 @@ export function SearchDetail({
       await onRestartSearch();
     } finally {
       setRestarting(false);
+    }
+  }
+
+  async function handleOutreach() {
+    const firstResult = search.results[0];
+
+    setOutreaching(true);
+    setOutreachStatus('idle');
+
+    try {
+      const payload = {
+        startups: firstResult
+          ? [
+              {
+                name: firstResult.companyName,
+                description: firstResult.description,
+                'matching reason': firstResult.fitExplanation,
+              },
+            ]
+          : [],
+        'company-data': {
+          'company-name': profile.companyName,
+          description: profile.description,
+          'manager-name': 'Max Mustermann',
+          address: 'Leopoldstraße 145, 80804 Munich, Germany',
+        },
+        'search-input': search.description,
+      };
+
+      const res = await fetch(OUTREACH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Request failed with status ${res.status}`);
+      }
+
+      // Register with server for 14-day follow-up call if no reply
+      if (firstResult) {
+        fetch('/api/track-outreach', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            startupName: firstResult.companyName,
+            emailContext: `We reached out 2 weeks ago about: ${search.description.slice(0, 300)}. We are looking for a pilot partner.`,
+          }),
+        }).catch(() => {/* non-critical, ignore */});
+      }
+
+      setOutreachStatus('success');
+    } catch (err) {
+      setOutreachStatus('error');
+      setOutreachError(err instanceof Error ? err.message : 'Outreach failed');
+    } finally {
+      setOutreaching(false);
     }
   }
 
@@ -64,6 +131,8 @@ export function SearchDetail({
     cant_reach: search.results.filter((r) => r.status === 'cant_reach').length,
   };
 
+  const outreachCount = counts.pending + counts.accepted;
+
   const filtered =
     filter === 'all' ? search.results : search.results.filter((r) => r.status === filter);
 
@@ -82,10 +151,45 @@ export function SearchDetail({
         <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={onBack}>
           Back to Dashboard
         </Button>
-        <Button variant="secondary" size="sm" icon={RotateCcw} onClick={handleRestart} loading={restarting} disabled={restarting}>
-          {restarting ? 'Restarting…' : 'Restart Search'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            icon={outreaching ? undefined : Send}
+            loading={outreaching}
+            disabled={outreaching || outreachCount === 0}
+            onClick={handleOutreach}
+          >
+            {outreaching ? 'Sending…' : `Start Outreach (${outreachCount})`}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={RotateCcw}
+            onClick={handleRestart}
+            loading={restarting}
+            disabled={restarting}
+          >
+            {restarting ? 'Restarting…' : 'Restart Search'}
+          </Button>
+        </div>
       </div>
+
+      {/* Outreach status banners */}
+      {outreachStatus === 'success' && (
+        <div className="flex items-center gap-2 mb-4 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
+          <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+          <p className="text-sm text-emerald-400">
+            Outreach triggered successfully for 1 startup.
+          </p>
+        </div>
+      )}
+      {outreachStatus === 'error' && (
+        <div className="flex items-center gap-2 mb-4 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3">
+          <AlertCircle size={15} className="text-red-400 shrink-0" />
+          <p className="text-sm text-red-400">{outreachError}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-6">
         {/* Sidebar */}

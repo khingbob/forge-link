@@ -98,6 +98,29 @@ export function useSearches() {
     [updateResult],
   );
 
+  // Update the first result matching companyName across all searches
+  const updateResultByCompanyName = useCallback(
+    (companyName: string, patch: Partial<SearchResult>) => {
+      setSearchesState((prev) => {
+        let found = false;
+        const updated = prev.map((s) => {
+          if (found) return s;
+          const idx = s.results.findIndex(
+            (r) => r.companyName.toLowerCase() === companyName.toLowerCase(),
+          );
+          if (idx === -1) return s;
+          found = true;
+          const newResults = [...s.results];
+          newResults[idx] = { ...newResults[idx], ...patch };
+          return { ...s, results: newResults };
+        });
+        if (found) setSearches(updated);
+        return found ? updated : prev;
+      });
+    },
+    [],
+  );
+
   const restartSearch = useCallback(
     async (searchId: string): Promise<string> => {
       const original = searches.find((s) => s.id === searchId);
@@ -153,6 +176,7 @@ export function useSearches() {
     createSearch,
     updateResult,
     setResultStatus,
+    updateResultByCompanyName,
     restartSearch,
   };
 }
